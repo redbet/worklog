@@ -1,0 +1,77 @@
+#!/usr/bin/env ruby
+
+# worklog.rb - Summarizes your day for easy time reporting
+#
+# Format of worklog is <tt>FORMAT</tt>
+#
+# Use like so
+#
+# cat worklog.txt | worklog.rb
+#
+# Happy reporting!
+require 'time'
+require 'pathname'
+
+FORMAT = /^(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2})\s(.*)$/
+DATE   = "%Y-%m-%d"
+HOME   = Pathname.new(File.expand_path("~/.worklog"))
+
+pipe = !$stdin.tty?
+
+def summarize_from_stdin
+  report = Hash.new(0)
+  prev_action, prev_time, today = Array.new(3) {nil}
+  ARGF.lines.sort.each do |line, _|
+    raise "Unsupported format for worklog: #{line}" unless line =~ FORMAT
+
+    time, action = Time.parse($1), $2
+    today ||= time.strftime(DATE)
+    report[prev_action] += time - prev_time if prev_action
+
+    prev_time, prev_action = time, action
+  end
+  report[prev_action] += Time.now - prev_time if prev_action
+
+  puts
+  puts "Today (#{today}) time was spent on"
+  puts "-" * 37
+  puts
+
+  report.each_pair do |action, time|
+    time = "%4s" % (time / 3600.0).round(2)
+    print "#{time}h\t#{action}\n"
+  end
+  puts
+  true
+end
+
+def add_entry(text)
+  date = text[/\A(\d{4}-\d{2}-\d{2})\s/,1]
+  begin
+    File.open(HOME + date, 'a') { |f| f << text + "\n" }
+  rescue Errno::ENOENT
+    File.open(HOME + date, 'w') {
+      ;
+    }
+    retry
+  end
+end
+
+def list_today
+  today = Date.today.strftime(DATE)
+  puts File.open(HOME + today).lines.sort.join
+end
+
+def new_entry
+  time, text = case ARGV[0]
+  when /\A(\d{2}:\d{2})/
+    [Time.now.strftime("#{DATE} ") + $1, ARGV[1..-1]]
+  else
+    [Time.now.strftime("#{DATE} %H:%M"), ARGV]
+  end
+  add_entry(text.unshift(time).join(' '))
+end
+
+summarize_from_stdin and exit 0 if pipe
+
+ARGV.empty? ? list_today : new_entry
